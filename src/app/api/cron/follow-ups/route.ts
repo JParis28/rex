@@ -68,11 +68,12 @@ export async function GET(req: NextRequest) {
         // Add system message for context
         await addSystemMessage(conversation.id, contextMessage);
 
-        // Process through Rex
+        // Process through Rex (no pacing delay for scheduled follow-ups)
         const result = await processConversation({
           tenant,
           lead,
           conversation,
+          trigger: "follow_up",
           contextMessage,
         });
 

@@ -85,18 +85,22 @@ async function handleInboundSMS(
   // Save the inbound message
   await addInboundMessage(conversation.id, data.message);
 
-  // Process through Rex's brain
+  // Process through Rex's brain (includes pacing delay before SMS send)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
+    trigger: "inbound_sms",
   });
 
-  console.log(`[webhook] Rex responded: ${result.smsMessage}`);
+  console.log(
+    `[webhook] Rex responded (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+  );
 
   return NextResponse.json({
     status: "processed",
     smsMessage: result.smsMessage,
+    pacing: result.pacing,
     actions: result.actions.map((a) => ({ tool: a.tool, result: a.result })),
   });
 }
@@ -124,19 +128,23 @@ async function handleMissedCall(
   // Add context message
   await addSystemMessage(conversation.id, "Missed call — text-back triggered.");
 
-  // Process through Rex with missed call context
+  // Process through Rex with missed call context (includes pacing delay)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
+    trigger: "missed_call",
     contextMessage: buildMissedCallContext(),
   });
 
-  console.log(`[webhook] Rex text-back: ${result.smsMessage}`);
+  console.log(
+    `[webhook] Rex text-back (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+  );
 
   return NextResponse.json({
     status: "processed",
     smsMessage: result.smsMessage,
+    pacing: result.pacing,
     actions: result.actions.map((a) => ({ tool: a.tool, result: a.result })),
   });
 }
@@ -173,19 +181,23 @@ async function handleFormSubmission(
     `Form submitted: ${JSON.stringify(formData)}`
   );
 
-  // Process through Rex with form context
+  // Process through Rex with form context (includes pacing delay)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
+    trigger: "form_submission",
     contextMessage: buildFormSubmissionContext(formData),
   });
 
-  console.log(`[webhook] Rex outreach: ${result.smsMessage}`);
+  console.log(
+    `[webhook] Rex outreach (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+  );
 
   return NextResponse.json({
     status: "processed",
     smsMessage: result.smsMessage,
+    pacing: result.pacing,
     actions: result.actions.map((a) => ({ tool: a.tool, result: a.result })),
   });
 }

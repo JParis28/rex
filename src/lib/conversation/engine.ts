@@ -5,6 +5,7 @@ import type { Tenant, Lead, Message, Conversation } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { GHLClient } from "../ghl/client";
 import { buildRexSystemPrompt } from "./prompts";
+import { calculateDelay, sleep } from "./pacing";
 
 const anthropic = new Anthropic();
 
@@ -115,18 +116,22 @@ const REX_TOOLS: Anthropic.Messages.Tool[] = [
   },
 ];
 
+export type ConversationTrigger = "missed_call" | "inbound_sms" | "form_submission" | "follow_up";
+
 export type ConversationContext = {
   tenant: Tenant;
   lead: Lead;
   conversation: Conversation;
+  trigger: ConversationTrigger;
   contextMessage?: string; // e.g. "This is a missed call text-back"
 };
 
 export async function processConversation(ctx: ConversationContext): Promise<{
   smsMessage?: string;
   actions: ToolAction[];
+  pacing: { delayMs: number; reason: string };
 }> {
-  const { tenant, lead, conversation, contextMessage } = ctx;
+  const { tenant, lead, conversation, trigger, contextMessage } = ctx;
 
   // Load conversation history
   const history = await db
@@ -203,14 +208,44 @@ export async function processConversation(ctx: ConversationContext): Promise<{
   const actions: ToolAction[] = [];
   let smsMessage: string | undefined;
 
-  for (const block of response.content) {
-    if (block.type === "tool_use") {
+  // First pass: collect what Rex wants to do (but don't send SMS yet)
+  const toolBlocks = response.content.filter(
+    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+  );
+
+  // Extract the SMS message if Rex is sending one
+  const smsBlock = toolBlocks.find((b) => b.name === "send_sms");
+  if (smsBlock) {
+    smsMessage = (smsBlock.input as { message: string }).message;
+  }
+
+  // Execute non-SMS tools immediately (status updates, bookings, etc.)
+  for (const block of toolBlocks) {
+    if (block.name !== "send_sms") {
       const action = await executeToolAction(block, ctx);
       actions.push(action);
-      if (block.name === "send_sms") {
-        smsMessage = (block.input as { message: string }).message;
-      }
     }
+  }
+
+  // --- PACING: Calculate and apply human-like delay before sending SMS ---
+  const lastLeadMsg = history.filter((m) => m.role === "lead").pop();
+  const pacing = calculateDelay({
+    trigger,
+    messages: history,
+    leadMessageContent: lastLeadMsg?.content,
+  });
+
+  if (smsMessage && pacing.delayMs > 0) {
+    console.log(
+      `[pacing] Waiting ${pacing.delayMs}ms before sending (reason: ${pacing.reason})`
+    );
+    await sleep(pacing.delayMs);
+  }
+
+  // NOW send the SMS after the delay
+  if (smsBlock) {
+    const action = await executeToolAction(smsBlock, ctx);
+    actions.push(action);
   }
 
   // Save Rex's SMS response as a message in the conversation
@@ -222,7 +257,7 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     });
   }
 
-  return { smsMessage, actions };
+  return { smsMessage, actions, pacing };
 }
 
 // -- Tool execution --
