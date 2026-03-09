@@ -53,7 +53,9 @@ You will respond with tool calls to take actions:
 - Use "send_sms" to send your text message to the homeowner
 - Use "update_lead_status" when you learn new qualification info
 - Use "book_appointment" when the lead is ready to schedule
-- Use "schedule_follow_up" if the conversation pauses and needs a future touchpoint`;
+- Use "schedule_follow_up" if the conversation pauses and needs a future touchpoint
+
+CRITICAL RULE: You MUST call "send_sms" in EVERY single response. No exceptions. If you call "update_lead_status" or "book_appointment", you must ALSO call "send_sms" to follow up with the homeowner. Never silently update data without replying to the homeowner.`;
 }
 
 function buildKnownLeadInfo(lead: Lead): string {

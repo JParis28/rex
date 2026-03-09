@@ -27,6 +27,10 @@ type LeadStatus = {
   urgency?: string;
 };
 
+function newSessionPhone() {
+  return "+1555" + String(Math.floor(Math.random() * 9000000) + 1000000);
+}
+
 export default function SimulatePage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<string>("");
@@ -36,6 +40,7 @@ export default function SimulatePage() {
   const [waitingLabel, setWaitingLabel] = useState("");
   const [leadStatus, setLeadStatus] = useState<LeadStatus | null>(null);
   const [started, setStarted] = useState(false);
+  const [sessionPhone, setSessionPhone] = useState<string>(newSessionPhone);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -98,9 +103,10 @@ export default function SimulatePage() {
           tenantId: selectedTenant,
           trigger,
           message,
+          phone: sessionPhone,
           formData:
             trigger === "form_submission"
-              ? { name: "John Smith", phone: "+15551234567", address: "123 Main St, St Pete FL" }
+              ? { name: "John Smith", phone: sessionPhone, address: "123 Main St, St Pete FL" }
               : undefined,
         }),
       });
@@ -166,6 +172,14 @@ export default function SimulatePage() {
     simulate("inbound_sms", msg);
   }
 
+  function resetChat() {
+    setMessages([]);
+    setLeadStatus(null);
+    setStarted(false);
+    setInput("");
+    setSessionPhone(newSessionPhone());
+  }
+
   const statusColors: Record<string, string> = {
     new: "bg-blue-100 text-blue-800",
     qualifying: "bg-yellow-100 text-yellow-800",
@@ -182,19 +196,34 @@ export default function SimulatePage() {
             Chat with Rex as a homeowner. Real AI, real pacing, no SMS sent.
           </p>
         </div>
-        {tenants.length > 1 && (
-          <select
-            className="border rounded px-2 py-1 text-sm"
-            value={selectedTenant}
-            onChange={(e) => setSelectedTenant(e.target.value)}
-          >
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.companyName}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          {tenants.length > 1 && (
+            <select
+              className="border rounded px-2 py-1 text-sm"
+              value={selectedTenant}
+              onChange={(e) => {
+                setSelectedTenant(e.target.value);
+                resetChat();
+              }}
+            >
+              {tenants.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.companyName}
+                </option>
+              ))}
+            </select>
+          )}
+          {started && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetChat}
+              disabled={loading}
+            >
+              Reset
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
