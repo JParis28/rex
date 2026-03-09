@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ghlWebhookSchema } from "@/lib/ghl/client";
+
+// Production pacing delays can be minutes — need generous timeout
+export const maxDuration = 300;
 import {
   processConversation,
   findOrCreateConversation,

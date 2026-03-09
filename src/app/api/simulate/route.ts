@@ -15,6 +15,9 @@ import {
   buildFormSubmissionContext,
 } from "@/lib/conversation/prompts";
 
+// Increase timeout — Claude API + DB calls can take 15-30s
+export const maxDuration = 60;
+
 /**
  * Simulation API — test Rex without GHL.
  *

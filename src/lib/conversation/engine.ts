@@ -153,17 +153,23 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     });
   }
 
-  // Convert conversation history to Claude format
+  // Convert conversation history to Claude format.
+  // IMPORTANT: Claude API requires strictly alternating user/assistant messages.
+  // When a lead sends multiple texts before Rex replies (e.g. "123 Main St" then "FL"
+  // then "hello?"), we merge them into one user message.
   for (const msg of history) {
-    if (msg.role === "lead") {
-      claudeMessages.push({ role: "user", content: msg.content });
-    } else if (msg.role === "rex") {
-      claudeMessages.push({
-        role: "assistant",
-        content: msg.content,
-      });
-    } else if (msg.role === "system") {
-      claudeMessages.push({ role: "user", content: `[SYSTEM] ${msg.content}` });
+    const role: "user" | "assistant" =
+      msg.role === "rex" ? "assistant" : "user";
+    const content =
+      msg.role === "system" ? `[SYSTEM] ${msg.content}` : msg.content;
+
+    const lastMsg = claudeMessages[claudeMessages.length - 1];
+
+    if (lastMsg && lastMsg.role === role) {
+      // Same role as previous — merge into one message
+      lastMsg.content = `${lastMsg.content}\n${content}`;
+    } else {
+      claudeMessages.push({ role, content });
     }
   }
 

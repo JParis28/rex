@@ -105,7 +105,16 @@ export default function SimulatePage() {
         }),
       });
 
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error (${res.status})`);
+      }
+
       const data = await res.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
 
       if (data.smsMessage) {
         setMessages((prev) => [
@@ -117,17 +126,28 @@ export default function SimulatePage() {
             pacing: data.pacing,
           },
         ]);
+      } else {
+        // Claude responded but didn't use send_sms tool — show a notice
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: "Rex processed the message but didn't generate a text reply.",
+            timestamp: new Date(),
+          },
+        ]);
       }
 
       if (data.lead) {
         setLeadStatus(data.lead);
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
       setMessages((prev) => [
         ...prev,
         {
           role: "system",
-          content: `Error: ${err}`,
+          content: `Error: ${errorMsg}. Try sending your message again.`,
           timestamp: new Date(),
         },
       ]);
