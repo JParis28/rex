@@ -124,6 +124,8 @@ export type ConversationContext = {
   conversation: Conversation;
   trigger: ConversationTrigger;
   contextMessage?: string; // e.g. "This is a missed call text-back"
+  skipPacing?: boolean;    // Skip the delay (for simulator / testing)
+  skipSms?: boolean;       // Skip actual GHL SMS send (for simulator)
 };
 
 export async function processConversation(ctx: ConversationContext): Promise<{
@@ -235,17 +237,23 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     leadMessageContent: lastLeadMsg?.content,
   });
 
-  if (smsMessage && pacing.delayMs > 0) {
+  if (smsMessage && pacing.delayMs > 0 && !ctx.skipPacing) {
     console.log(
       `[pacing] Waiting ${pacing.delayMs}ms before sending (reason: ${pacing.reason})`
     );
     await sleep(pacing.delayMs);
+  } else if (ctx.skipPacing) {
+    console.log(
+      `[pacing] SKIPPED ${pacing.delayMs}ms delay (reason: ${pacing.reason}) — simulator mode`
+    );
   }
 
-  // NOW send the SMS after the delay
-  if (smsBlock) {
+  // NOW send the SMS after the delay (skip if in simulator mode)
+  if (smsBlock && !ctx.skipSms) {
     const action = await executeToolAction(smsBlock, ctx);
     actions.push(action);
+  } else if (smsBlock && ctx.skipSms) {
+    actions.push({ tool: "send_sms", input: smsBlock.input as Record<string, unknown>, result: "simulated" });
   }
 
   // Save Rex's SMS response as a message in the conversation

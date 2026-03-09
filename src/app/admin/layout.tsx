@@ -24,6 +24,12 @@ export default function AdminLayout({
           >
             Clients
           </Link>
+          <Link
+            href="/admin/simulate"
+            className="text-sm text-green-600 hover:text-green-800 font-medium"
+          >
+            Test Rex
+          </Link>
         </div>
       </nav>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
