@@ -5,6 +5,7 @@ import { eq, and, lte } from "drizzle-orm";
 import {
   processConversation,
   addSystemMessage,
+  type AgentType,
 } from "@/lib/conversation/engine";
 import {
   buildEstimateFollowUpContext,
@@ -68,12 +69,13 @@ export async function GET(req: NextRequest) {
         // Add system message for context
         await addSystemMessage(conversation.id, contextMessage);
 
-        // Process through Rex (no pacing delay for scheduled follow-ups)
+        // Process through the tenant's agent (no pacing delay for scheduled follow-ups)
         const result = await processConversation({
           tenant,
           lead,
           conversation,
           trigger: "follow_up",
+          agentType: (tenant.agentType as AgentType) || "rex",
           contextMessage,
         });
 

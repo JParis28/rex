@@ -30,8 +30,11 @@ export const conversationStatusEnum = pgEnum("conversation_status", [
 export const messageRoleEnum = pgEnum("message_role", [
   "lead",
   "rex",
+  "randy",
   "system",
 ]);
+
+export const agentTypeEnum = pgEnum("agent_type", ["rex", "randy"]);
 
 export const followUpTypeEnum = pgEnum("follow_up_type", [
   "estimate",
@@ -57,6 +60,7 @@ export const tenants = pgTable("tenants", {
   timezone: text("timezone").notNull().default("America/New_York"),
   calendarId: text("calendar_id"), // GHL calendar ID for booking
   pipelineId: text("pipeline_id"), // GHL pipeline ID
+  agentType: agentTypeEnum("agent_type").notNull().default("rex"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
+type AgentType = "rex" | "randy";
+
 type Tenant = {
   id: string;
   companyName: string;
+  agentType?: AgentType;
 };
 
 type Message = {
-  role: "lead" | "rex" | "system";
+  role: "lead" | "rex" | "randy" | "system";
   content: string;
   timestamp: Date;
   pacing?: { delayMs: number; delayFormatted: string; reason: string };
@@ -34,6 +37,7 @@ function newSessionPhone() {
 export default function SimulatePage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<string>("");
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>("rex");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,7 +52,10 @@ export default function SimulatePage() {
       .then((r) => r.json())
       .then((data) => {
         setTenants(data);
-        if (data.length > 0) setSelectedTenant(data[0].id);
+        if (data.length > 0) {
+          setSelectedTenant(data[0].id);
+          setSelectedAgent(data[0].agentType || "rex");
+        }
       });
   }, []);
 
@@ -56,19 +63,25 @@ export default function SimulatePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const agentName = selectedAgent === "randy" ? "Randy" : "Rex";
+  const agentColor = selectedAgent === "randy" ? "orange" : "blue";
+
   async function simulate(
-    trigger: "missed_call" | "inbound_sms" | "form_submission",
-    message?: string
+    trigger: string,
+    message?: string,
+    extra?: Record<string, unknown>
   ) {
     if (!selectedTenant) return;
     setLoading(true);
-    setWaitingLabel(
-      trigger === "missed_call"
-        ? "Rex is composing a text-back..."
-        : trigger === "form_submission"
-        ? "Rex is drafting outreach..."
-        : "Rex is typing..."
-    );
+
+    const labels: Record<string, string> = {
+      missed_call: `${agentName} is composing a text-back...`,
+      form_submission: `${agentName} is drafting outreach...`,
+      inbound_sms: `${agentName} is typing...`,
+      re_engage: `${agentName} is crafting a re-engagement...`,
+      storm_event: `${agentName} is firing storm outreach...`,
+    };
+    setWaitingLabel(labels[trigger] || `${agentName} is typing...`);
 
     if (trigger === "inbound_sms" && message) {
       setMessages((prev) => [
@@ -80,7 +93,7 @@ export default function SimulatePage() {
         ...prev,
         {
           role: "system",
-          content: "Missed call — Rex is texting back...",
+          content: `Missed call — ${agentName} is texting back...`,
           timestamp: new Date(),
         },
       ]);
@@ -89,7 +102,26 @@ export default function SimulatePage() {
         ...prev,
         {
           role: "system",
-          content: "Web form submitted — Rex is reaching out...",
+          content: `Web form submitted — ${agentName} is reaching out...`,
+          timestamp: new Date(),
+        },
+      ]);
+    } else if (trigger === "re_engage") {
+      const touchNum = (extra?.touchNumber as number) || 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `30-day re-engagement — Touch ${touchNum} of 3`,
+          timestamp: new Date(),
+        },
+      ]);
+    } else if (trigger === "storm_event") {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: "Storm event detected — Randy firing emergency outreach...",
           timestamp: new Date(),
         },
       ]);
@@ -104,10 +136,12 @@ export default function SimulatePage() {
           trigger,
           message,
           phone: sessionPhone,
+          agentType: selectedAgent,
           formData:
             trigger === "form_submission"
               ? { name: "John Smith", phone: sessionPhone, address: "123 Main St, St Pete FL" }
               : undefined,
+          ...extra,
         }),
       });
 
@@ -126,19 +160,18 @@ export default function SimulatePage() {
         setMessages((prev) => [
           ...prev,
           {
-            role: "rex",
+            role: selectedAgent,
             content: data.smsMessage,
             timestamp: new Date(),
             pacing: data.pacing,
           },
         ]);
       } else {
-        // Claude responded but didn't use send_sms tool — show a notice
         setMessages((prev) => [
           ...prev,
           {
             role: "system",
-            content: "Rex processed the message but didn't generate a text reply.",
+            content: `${agentName} processed the message but didn't generate a reply.`,
             timestamp: new Date(),
           },
         ]);
@@ -185,18 +218,70 @@ export default function SimulatePage() {
     qualifying: "bg-yellow-100 text-yellow-800",
     qualified: "bg-green-100 text-green-800",
     inspection_scheduled: "bg-purple-100 text-purple-800",
+    estimate_sent: "bg-orange-100 text-orange-800",
+    closed_won: "bg-emerald-100 text-emerald-800",
+    closed_lost: "bg-red-100 text-red-800",
+  };
+
+  const msgBubbleClass = (role: string) => {
+    if (role === "rex") return "bg-blue-500 text-white";
+    if (role === "randy") return "bg-orange-500 text-white";
+    if (role === "system") return "bg-gray-100 text-gray-500 italic text-xs";
+    return "bg-gray-200 text-gray-900";
+  };
+
+  const msgLabelColor = (role: string) => {
+    if (role === "rex") return "text-blue-200";
+    if (role === "randy") return "text-orange-200";
+    return "text-gray-400";
+  };
+
+  const msgPacingBg = (role: string) => {
+    if (role === "rex") return "bg-blue-600 text-blue-100";
+    if (role === "randy") return "bg-orange-600 text-orange-100";
+    return "bg-gray-200";
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Test Rex</h1>
+          <h1 className="text-2xl font-bold">Test {agentName}</h1>
           <p className="text-sm text-gray-500">
-            Chat with Rex as a homeowner. Real AI, real pacing, no SMS sent.
+            Chat with {agentName} as a homeowner. Real AI, real pacing, no SMS sent.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Agent selector */}
+          <div className="flex rounded-lg border overflow-hidden">
+            <button
+              className={`px-3 py-1 text-sm font-medium transition-colors ${
+                selectedAgent === "rex"
+                  ? "bg-blue-500 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => {
+                setSelectedAgent("rex");
+                resetChat();
+              }}
+            >
+              Rex
+            </button>
+            <button
+              className={`px-3 py-1 text-sm font-medium transition-colors ${
+                selectedAgent === "randy"
+                  ? "bg-orange-500 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+              onClick={() => {
+                setSelectedAgent("randy");
+                resetChat();
+              }}
+            >
+              Randy
+            </button>
+          </div>
+
           {tenants.length > 1 && (
             <select
               className="border rounded px-2 py-1 text-sm"
@@ -238,28 +323,70 @@ export default function SimulatePage() {
                     Choose a scenario to start, or just type a message.
                   </p>
                   <div className="flex gap-2 justify-center flex-wrap">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setStarted(true);
-                        simulate("missed_call");
-                      }}
-                      disabled={loading || !selectedTenant}
-                    >
-                      Simulate missed call
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setStarted(true);
-                        simulate("form_submission");
-                      }}
-                      disabled={loading || !selectedTenant}
-                    >
-                      Simulate form submission
-                    </Button>
+                    {selectedAgent === "rex" ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setStarted(true);
+                            simulate("missed_call");
+                          }}
+                          disabled={loading || !selectedTenant}
+                        >
+                          Simulate missed call
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setStarted(true);
+                            simulate("form_submission");
+                          }}
+                          disabled={loading || !selectedTenant}
+                        >
+                          Simulate form submission
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setStarted(true);
+                            simulate("re_engage", undefined, { touchNumber: 1 });
+                          }}
+                          disabled={loading || !selectedTenant}
+                        >
+                          30-day re-engage (SMS)
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setStarted(true);
+                            simulate("re_engage", undefined, { touchNumber: 2 });
+                          }}
+                          disabled={loading || !selectedTenant}
+                        >
+                          Re-engage Touch 2 (Email)
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setStarted(true);
+                            simulate("storm_event", undefined, {
+                              stormInfo: "Severe hailstorm reported in St. Petersburg, FL area — widespread damage expected",
+                            });
+                          }}
+                          disabled={loading || !selectedTenant}
+                        >
+                          Storm event
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -268,7 +395,7 @@ export default function SimulatePage() {
                 <div
                   key={i}
                   className={`flex ${
-                    msg.role === "rex"
+                    msg.role === "rex" || msg.role === "randy"
                       ? "justify-end"
                       : msg.role === "system"
                       ? "justify-center"
@@ -276,34 +403,24 @@ export default function SimulatePage() {
                   }`}
                 >
                   <div
-                    className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                      msg.role === "rex"
-                        ? "bg-blue-500 text-white"
-                        : msg.role === "system"
-                        ? "bg-gray-100 text-gray-500 italic text-xs"
-                        : "bg-gray-200 text-gray-900"
-                    }`}
+                    className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${msgBubbleClass(msg.role)}`}
                   >
                     <p>{msg.content}</p>
                     <div
-                      className={`text-xs mt-1 flex items-center gap-2 ${
-                        msg.role === "rex" ? "text-blue-200" : "text-gray-400"
-                      }`}
+                      className={`text-xs mt-1 flex items-center gap-2 ${msgLabelColor(msg.role)}`}
                     >
                       <span>
                         {msg.role === "rex"
                           ? "Rex"
+                          : msg.role === "randy"
+                          ? "Randy"
                           : msg.role === "system"
                           ? ""
                           : "You (homeowner)"}
                       </span>
                       {msg.pacing && (
                         <span
-                          className={`${
-                            msg.role === "rex"
-                              ? "bg-blue-600 text-blue-100"
-                              : "bg-gray-200"
-                          } px-1.5 py-0.5 rounded text-[10px] font-mono`}
+                          className={`${msgPacingBg(msg.role)} px-1.5 py-0.5 rounded text-[10px] font-mono`}
                         >
                           {msg.pacing.delayFormatted} delay ({msg.pacing.reason})
                         </span>
@@ -315,7 +432,13 @@ export default function SimulatePage() {
 
               {loading && (
                 <div className="flex justify-end">
-                  <div className="bg-blue-100 text-blue-600 rounded-lg px-3 py-2 text-sm italic">
+                  <div
+                    className={`${
+                      selectedAgent === "randy"
+                        ? "bg-orange-100 text-orange-600"
+                        : "bg-blue-100 text-blue-600"
+                    } rounded-lg px-3 py-2 text-sm italic`}
+                  >
                     {waitingLabel}
                   </div>
                 </div>
@@ -394,7 +517,7 @@ export default function SimulatePage() {
                 </>
               ) : (
                 <p className="text-gray-400 text-xs">
-                  Start a conversation to see Rex qualify the lead.
+                  Start a conversation to see {agentName} work the lead.
                 </p>
               )}
             </CardContent>
@@ -402,16 +525,38 @@ export default function SimulatePage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">How it works</CardTitle>
+              <CardTitle className="text-sm">
+                {selectedAgent === "randy" ? "About Randy" : "How it works"}
+              </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-gray-500 space-y-1">
-              <p>This uses the real Rex conversation engine and Claude API.</p>
-              <p>
-                The pacing delay is calculated but <strong>skipped</strong> in
-                the UI for speed. The tag on each message shows what the delay
-                <em> would be</em> in production.
-              </p>
-              <p>No SMS is actually sent. GHL is not contacted.</p>
+              {selectedAgent === "randy" ? (
+                <>
+                  <p>
+                    <strong>Randy</strong> is the Dead Lead Digger. He re-engages
+                    cold leads that went silent.
+                  </p>
+                  <p>
+                    3-touch sequence: SMS (Day 1) → Email (Day 3) → Final
+                    attempt (Day 5). Any positive response gets handed to Rex
+                    immediately.
+                  </p>
+                  <p>
+                    Storm events trigger emergency outreach to the entire cold
+                    lead list within 2 hours.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>This uses the real Rex conversation engine and Claude API.</p>
+                  <p>
+                    The pacing delay is calculated but <strong>skipped</strong> in
+                    the UI for speed. The tag on each message shows what the delay
+                    <em> would be</em> in production.
+                  </p>
+                  <p>No SMS is actually sent. GHL is not contacted.</p>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

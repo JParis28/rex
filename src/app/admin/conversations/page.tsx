@@ -124,37 +124,45 @@ export default function ConversationsPage() {
           {selectedId ? (
             <Card className="h-[70vh] flex flex-col">
               <CardContent className="flex-1 overflow-y-auto py-4 space-y-3">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${
-                      msg.role === "rex" ? "justify-end" : "justify-start"
-                    }`}
-                  >
+                {messages.map((msg) => {
+                  const isAgent = msg.role === "rex" || msg.role === "randy";
+                  const agentLabel = msg.role === "randy" ? "Randy" : msg.role === "rex" ? "Rex" : msg.role === "system" ? "System" : "Lead";
+                  return (
                     <div
-                      className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
-                        msg.role === "rex"
-                          ? "bg-blue-500 text-white"
-                          : msg.role === "system"
-                          ? "bg-gray-200 text-gray-600 italic text-xs"
-                          : "bg-gray-100 text-gray-900"
+                      key={msg.id}
+                      className={`flex ${
+                        isAgent ? "justify-end" : "justify-start"
                       }`}
                     >
-                      <p>{msg.content}</p>
-                      <p
-                        className={`text-xs mt-1 ${
+                      <div
+                        className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
                           msg.role === "rex"
-                            ? "text-blue-200"
-                            : "text-gray-400"
+                            ? "bg-blue-500 text-white"
+                            : msg.role === "randy"
+                            ? "bg-orange-500 text-white"
+                            : msg.role === "system"
+                            ? "bg-gray-200 text-gray-600 italic text-xs"
+                            : "bg-gray-100 text-gray-900"
                         }`}
                       >
-                        {msg.role === "rex" ? "Rex" : msg.role === "system" ? "System" : "Lead"}{" "}
-                        &middot;{" "}
-                        {new Date(msg.createdAt).toLocaleTimeString()}
-                      </p>
+                        <p>{msg.content}</p>
+                        <p
+                          className={`text-xs mt-1 ${
+                            msg.role === "rex"
+                              ? "text-blue-200"
+                              : msg.role === "randy"
+                              ? "text-orange-200"
+                              : "text-gray-400"
+                          }`}
+                        >
+                          {agentLabel}{" "}
+                          &middot;{" "}
+                          {new Date(msg.createdAt).toLocaleTimeString()}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {messages.length === 0 && (
                   <p className="text-center text-gray-400 py-8">
                     No messages in this conversation yet.

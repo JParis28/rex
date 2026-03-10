@@ -11,6 +11,7 @@ const createTenantSchema = z.object({
   timezone: z.string().default("America/New_York"),
   calendarId: z.string().optional(),
   pipelineId: z.string().optional(),
+  agentType: z.enum(["rex", "randy"]).default("rex"),
 });
 
 export async function GET() {

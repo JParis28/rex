@@ -16,6 +16,7 @@ type Tenant = {
   timezone: string;
   calendarId: string | null;
   pipelineId: string | null;
+  agentType: string;
   createdAt: string;
 };
 
@@ -41,6 +42,7 @@ export default function TenantsPage() {
       timezone: form.get("timezone") || "America/New_York",
       calendarId: form.get("calendarId") || undefined,
       pipelineId: form.get("pipelineId") || undefined,
+      agentType: form.get("agentType") || "rex",
       serviceAreas: (form.get("serviceAreas") as string)
         ?.split(",")
         .map((s) => s.trim())
@@ -138,6 +140,18 @@ export default function TenantsPage() {
                     placeholder="pipe_..."
                   />
                 </div>
+                <div>
+                  <Label htmlFor="agentType">Agent</Label>
+                  <select
+                    id="agentType"
+                    name="agentType"
+                    className="w-full border rounded-md px-3 py-2 text-sm"
+                    defaultValue="rex"
+                  >
+                    <option value="rex">Rex (Sales Rep)</option>
+                    <option value="randy">Randy (Dead Lead Digger)</option>
+                  </select>
+                </div>
               </div>
               <Button type="submit">Add Company</Button>
             </form>
@@ -173,7 +187,16 @@ export default function TenantsPage() {
                     </div>
                   )}
                 </div>
-                <div className="text-right text-sm text-gray-500">
+                <div className="text-right text-sm text-gray-500 space-y-1">
+                  <Badge
+                    className={
+                      tenant.agentType === "randy"
+                        ? "bg-orange-100 text-orange-800"
+                        : "bg-blue-100 text-blue-800"
+                    }
+                  >
+                    {tenant.agentType === "randy" ? "Randy" : "Rex"}
+                  </Badge>
                   <p>{tenant.timezone}</p>
                   <p>
                     Webhook:{" "}

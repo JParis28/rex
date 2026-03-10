@@ -4,8 +4,10 @@ import { conversations, messages, leads, followUps, tenants } from "../db/schema
 import type { Tenant, Lead, Message, Conversation } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { GHLClient } from "../ghl/client";
-import { buildRexSystemPrompt } from "./prompts";
+import { buildRexSystemPrompt, buildRandySystemPrompt } from "./prompts";
 import { calculateDelay, sleep } from "./pacing";
+
+export type AgentType = "rex" | "randy";
 
 const anthropic = new Anthropic();
 
@@ -116,16 +118,134 @@ const REX_TOOLS: Anthropic.Messages.Tool[] = [
   },
 ];
 
-export type ConversationTrigger = "missed_call" | "inbound_sms" | "form_submission" | "follow_up";
+// Tools Randy can use during re-engagement
+const RANDY_TOOLS: Anthropic.Messages.Tool[] = [
+  {
+    name: "send_sms",
+    description:
+      "Send an SMS text message to the homeowner. This is your primary way of communicating.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        message: {
+          type: "string",
+          description:
+            "The text message to send. Keep it short and natural — 1-2 sentences.",
+        },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "send_email",
+    description:
+      "Send an email to the homeowner. Use for Touch 2 in the re-engagement sequence or storm follow-up emails.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        subject: {
+          type: "string",
+          description: "The email subject line. Keep it personal and specific.",
+        },
+        body: {
+          type: "string",
+          description:
+            "The email body. Keep it brief — 2-4 sentences max. Professional but warm.",
+        },
+      },
+      required: ["subject", "body"],
+    },
+  },
+  {
+    name: "flag_warm_lead",
+    description:
+      "Flag this lead as warm for immediate handoff to Rex. Use when the homeowner responds positively or asks questions showing interest.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reason: {
+          type: "string",
+          description:
+            "Why this lead is warm (e.g. 'Homeowner asked about updated pricing', 'Wants to reschedule inspection').",
+        },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "archive_lead",
+    description:
+      "Archive this lead after the re-engagement sequence is complete with no response, or if the homeowner explicitly declines.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reason: {
+          type: "string",
+          description:
+            "Why the lead is being archived (e.g. 'No response after 3 touches', 'Homeowner went with competitor').",
+        },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "update_lead_status",
+    description:
+      "Update the lead's qualification info when you learn something new from the conversation.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        status: {
+          type: "string",
+          enum: [
+            "new",
+            "qualifying",
+            "qualified",
+            "inspection_scheduled",
+            "estimate_sent",
+            "closed_won",
+            "closed_lost",
+          ],
+        },
+        issueType: {
+          type: "string",
+          description: "The roofing issue: damage, leak, replacement, inspection, etc.",
+        },
+        roofAge: {
+          type: "string",
+          description: "Approximate age of the roof.",
+        },
+        insuranceOrOop: {
+          type: "string",
+          enum: ["insurance", "out_of_pocket"],
+          description: "Whether they'll use insurance or pay out of pocket.",
+        },
+        address: {
+          type: "string",
+          description: "The property address.",
+        },
+        urgency: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          description: "How urgent the issue is.",
+        },
+      },
+      required: ["status"],
+    },
+  },
+];
+
+export type ConversationTrigger = "missed_call" | "inbound_sms" | "form_submission" | "follow_up" | "re_engage" | "storm_event";
 
 export type ConversationContext = {
   tenant: Tenant;
   lead: Lead;
   conversation: Conversation;
   trigger: ConversationTrigger;
-  contextMessage?: string; // e.g. "This is a missed call text-back"
-  skipPacing?: boolean;    // Skip the delay (for simulator / testing)
-  skipSms?: boolean;       // Skip actual GHL SMS send (for simulator)
+  agentType?: AgentType;     // Which agent handles this — defaults to tenant.agentType
+  contextMessage?: string;   // e.g. "This is a missed call text-back"
+  skipPacing?: boolean;      // Skip the delay (for simulator / testing)
+  skipSms?: boolean;         // Skip actual GHL SMS send (for simulator)
 };
 
 export async function processConversation(ctx: ConversationContext): Promise<{
@@ -134,6 +254,7 @@ export async function processConversation(ctx: ConversationContext): Promise<{
   pacing: { delayMs: number; reason: string };
 }> {
   const { tenant, lead, conversation, trigger, contextMessage } = ctx;
+  const agent: AgentType = ctx.agentType || (tenant.agentType as AgentType) || "rex";
 
   // Load conversation history
   const history = await db
@@ -159,7 +280,7 @@ export async function processConversation(ctx: ConversationContext): Promise<{
   // then "hello?"), we merge them into one user message.
   for (const msg of history) {
     const role: "user" | "assistant" =
-      msg.role === "rex" ? "assistant" : "user";
+      msg.role === "rex" || msg.role === "randy" ? "assistant" : "user";
     const content =
       msg.role === "system" ? `[SYSTEM] ${msg.content}` : msg.content;
 
@@ -182,9 +303,9 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     });
   }
 
-  // Fetch available slots if tenant has a calendar configured
+  // Fetch available slots if tenant has a calendar configured (Rex only — Randy doesn't book)
   let availableSlots: string[] | undefined;
-  if (tenant.calendarId) {
+  if (agent === "rex" && tenant.calendarId) {
     try {
       const ghl = new GHLClient(tenant.ghlApiKey, tenant.ghlLocationId);
       const now = new Date();
@@ -200,15 +321,19 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     }
   }
 
-  // Build system prompt
-  const systemPrompt = buildRexSystemPrompt(tenant, lead, availableSlots);
+  // Build system prompt and select tools based on agent type
+  const systemPrompt = agent === "randy"
+    ? buildRandySystemPrompt(tenant, lead)
+    : buildRexSystemPrompt(tenant, lead, availableSlots);
+
+  const tools = agent === "randy" ? RANDY_TOOLS : REX_TOOLS;
 
   // Call Claude
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 1024,
     system: systemPrompt,
-    tools: REX_TOOLS,
+    tools,
     messages: claudeMessages,
   });
 
@@ -221,21 +346,27 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
   );
 
-  // Extract the SMS message if Rex is sending one
+  // Extract the outbound message — could be SMS or email (Randy uses both)
   const smsBlock = toolBlocks.find((b) => b.name === "send_sms");
+  const emailBlock = toolBlocks.find((b) => b.name === "send_email");
+
   if (smsBlock) {
     smsMessage = (smsBlock.input as { message: string }).message;
+  } else if (emailBlock) {
+    // For email, use the body as the display message
+    const emailInput = emailBlock.input as { subject: string; body: string };
+    smsMessage = `[Email: ${emailInput.subject}] ${emailInput.body}`;
   }
 
-  // Execute non-SMS tools immediately (status updates, bookings, etc.)
+  // Execute non-outbound tools immediately (status updates, bookings, flagging, etc.)
   for (const block of toolBlocks) {
-    if (block.name !== "send_sms") {
+    if (block.name !== "send_sms" && block.name !== "send_email") {
       const action = await executeToolAction(block, ctx);
       actions.push(action);
     }
   }
 
-  // --- PACING: Calculate and apply human-like delay before sending SMS ---
+  // --- PACING: Calculate and apply human-like delay before sending ---
   const lastLeadMsg = history.filter((m) => m.role === "lead").pop();
   const pacing = calculateDelay({
     trigger,
@@ -254,7 +385,7 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     );
   }
 
-  // NOW send the SMS after the delay (skip if in simulator mode)
+  // NOW send the outbound message after the delay (skip if in simulator mode)
   if (smsBlock && !ctx.skipSms) {
     const action = await executeToolAction(smsBlock, ctx);
     actions.push(action);
@@ -262,11 +393,18 @@ export async function processConversation(ctx: ConversationContext): Promise<{
     actions.push({ tool: "send_sms", input: smsBlock.input as Record<string, unknown>, result: "simulated" });
   }
 
-  // Save Rex's SMS response as a message in the conversation
+  if (emailBlock && !ctx.skipSms) {
+    const action = await executeToolAction(emailBlock, ctx);
+    actions.push(action);
+  } else if (emailBlock && ctx.skipSms) {
+    actions.push({ tool: "send_email", input: emailBlock.input as Record<string, unknown>, result: "simulated" });
+  }
+
+  // Save agent's response as a message in the conversation
   if (smsMessage) {
     await db.insert(messages).values({
       conversationId: conversation.id,
-      role: "rex",
+      role: agent,
       content: smsMessage,
     });
   }
@@ -365,6 +503,51 @@ async function executeToolAction(
       });
 
       return { tool: "schedule_follow_up", input, result: "scheduled" };
+    }
+
+    // -- Randy-specific tools --
+
+    case "send_email": {
+      // Email sending would go through SendGrid/Gmail API in production.
+      // For now, log it and return success.
+      console.log(
+        `[randy] Email to ${lead.email || lead.phone}: Subject: ${input.subject}`
+      );
+      return { tool: "send_email", input, result: "sent" };
+    }
+
+    case "flag_warm_lead": {
+      // Update lead status to qualifying and log the handoff
+      await db
+        .update(leads)
+        .set({ status: "qualifying", updatedAt: new Date() })
+        .where(eq(leads.id, lead.id));
+
+      // Add a system message noting the handoff
+      await db.insert(messages).values({
+        conversationId: conversation.id,
+        role: "system",
+        content: `Randy flagged as warm lead: ${input.reason}. Handing off to Rex.`,
+      });
+
+      console.log(`[randy] Warm lead flagged: ${input.reason}`);
+      return { tool: "flag_warm_lead", input, result: "flagged" };
+    }
+
+    case "archive_lead": {
+      await db
+        .update(leads)
+        .set({ status: "closed_lost", updatedAt: new Date() })
+        .where(eq(leads.id, lead.id));
+
+      // Complete the conversation
+      await db
+        .update(conversations)
+        .set({ status: "completed" })
+        .where(eq(conversations.id, conversation.id));
+
+      console.log(`[randy] Lead archived: ${input.reason}`);
+      return { tool: "archive_lead", input, result: "archived" };
     }
 
     default:

@@ -10,10 +10,12 @@ import {
   addInboundMessage,
   addSystemMessage,
   getTenantByLocationId,
+  type AgentType,
 } from "@/lib/conversation/engine";
 import {
   buildMissedCallContext,
   buildFormSubmissionContext,
+  buildRandyInboundContext,
 } from "@/lib/conversation/prompts";
 
 export async function POST(req: NextRequest) {
@@ -88,16 +90,21 @@ async function handleInboundSMS(
   // Save the inbound message
   await addInboundMessage(conversation.id, data.message);
 
-  // Process through Rex's brain (includes pacing delay before SMS send)
+  const agent = (tenant.agentType as AgentType) || "rex";
+
+  // Process through the tenant's agent (includes pacing delay before SMS send)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
     trigger: "inbound_sms",
+    agentType: agent,
+    contextMessage: agent === "randy" ? buildRandyInboundContext() : undefined,
   });
 
+  const agentName = agent === "randy" ? "Randy" : "Rex";
   console.log(
-    `[webhook] Rex responded (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+    `[webhook] ${agentName} responded (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
   );
 
   return NextResponse.json({
@@ -131,17 +138,21 @@ async function handleMissedCall(
   // Add context message
   await addSystemMessage(conversation.id, "Missed call — text-back triggered.");
 
-  // Process through Rex with missed call context (includes pacing delay)
+  const agent = (tenant.agentType as AgentType) || "rex";
+
+  // Process through the tenant's agent with missed call context (includes pacing delay)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
     trigger: "missed_call",
+    agentType: agent,
     contextMessage: buildMissedCallContext(),
   });
 
+  const agentName = agent === "randy" ? "Randy" : "Rex";
   console.log(
-    `[webhook] Rex text-back (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+    `[webhook] ${agentName} text-back (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
   );
 
   return NextResponse.json({
@@ -184,17 +195,21 @@ async function handleFormSubmission(
     `Form submitted: ${JSON.stringify(formData)}`
   );
 
-  // Process through Rex with form context (includes pacing delay)
+  const agent = (tenant.agentType as AgentType) || "rex";
+
+  // Process through the tenant's agent with form context (includes pacing delay)
   const result = await processConversation({
     tenant,
     lead,
     conversation,
     trigger: "form_submission",
+    agentType: agent,
     contextMessage: buildFormSubmissionContext(formData),
   });
 
+  const agentName = agent === "randy" ? "Randy" : "Rex";
   console.log(
-    `[webhook] Rex outreach (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
+    `[webhook] ${agentName} outreach (${result.pacing.delayMs}ms delay, ${result.pacing.reason}): ${result.smsMessage}`
   );
 
   return NextResponse.json({

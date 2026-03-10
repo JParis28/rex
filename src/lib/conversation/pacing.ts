@@ -1,7 +1,7 @@
 import type { Message } from "../db/schema";
 
 type PacingContext = {
-  trigger: "missed_call" | "inbound_sms" | "form_submission" | "follow_up";
+  trigger: "missed_call" | "inbound_sms" | "form_submission" | "follow_up" | "re_engage" | "storm_event";
   messages: Message[];        // Full conversation history
   leadMessageContent?: string; // The message we're responding to
 };
@@ -32,9 +32,14 @@ type PacingResult = {
 export function calculateDelay(ctx: PacingContext): PacingResult {
   const { trigger, messages, leadMessageContent } = ctx;
 
-  // Follow-ups are scheduled — no artificial delay needed
-  if (trigger === "follow_up") {
-    return { delayMs: 0, reason: "scheduled_follow_up" };
+  // Follow-ups and re-engagements are scheduled — no artificial delay needed
+  if (trigger === "follow_up" || trigger === "re_engage") {
+    return { delayMs: 0, reason: "scheduled_outreach" };
+  }
+
+  // Storm events fire ASAP — urgency is the point
+  if (trigger === "storm_event") {
+    return { delayMs: 0, reason: "storm_event_urgent" };
   }
 
   // ── First touches ──────────────────────────────────────────────

@@ -9,10 +9,14 @@ import {
   addInboundMessage,
   addSystemMessage,
   type ConversationTrigger,
+  type AgentType,
 } from "@/lib/conversation/engine";
 import {
   buildMissedCallContext,
   buildFormSubmissionContext,
+  buildReEngageContext,
+  buildStormReEngageContext,
+  buildRandyInboundContext,
 } from "@/lib/conversation/prompts";
 
 // Increase timeout — Claude API + DB calls can take 15-30s
@@ -29,12 +33,13 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenantId, trigger, message, phone, formData } = body as {
+    const { tenantId, trigger, message, phone, formData, agentType: agentOverride } = body as {
       tenantId: string;
       trigger: ConversationTrigger;
       message?: string;
       phone?: string;
       formData?: Record<string, string>;
+      agentType?: AgentType;
     };
 
     // Find tenant
@@ -54,6 +59,8 @@ export async function POST(req: NextRequest) {
     const lead = await findOrCreateLead(tenant.id, simPhone, undefined, formData?.name);
     const conversation = await findOrCreateConversation(tenant.id, lead.id, "sms");
 
+    const agent: AgentType = agentOverride || (tenant.agentType as AgentType) || "rex";
+
     let contextMessage: string | undefined;
 
     if (trigger === "missed_call") {
@@ -65,17 +72,30 @@ export async function POST(req: NextRequest) {
       contextMessage = buildFormSubmissionContext(data);
     } else if (trigger === "inbound_sms" && message) {
       await addInboundMessage(conversation.id, message);
+      // If Randy is handling an inbound response, add context
+      if (agent === "randy") {
+        contextMessage = buildRandyInboundContext();
+      }
+    } else if (trigger === "re_engage") {
+      const touchNumber = body.touchNumber || 1;
+      await addSystemMessage(conversation.id, `Randy re-engagement — Touch ${touchNumber} of 3`);
+      contextMessage = buildReEngageContext(touchNumber);
+    } else if (trigger === "storm_event") {
+      const stormInfo = body.stormInfo || "Significant storm reported in the service area";
+      await addSystemMessage(conversation.id, `Storm event triggered: ${stormInfo}`);
+      contextMessage = buildStormReEngageContext(stormInfo);
     }
 
     // Record the start time so we can measure total response time
     const startTime = Date.now();
 
-    // Process through Rex — skip pacing delay and actual SMS for simulator
+    // Process through the selected agent — skip pacing delay and actual SMS for simulator
     const result = await processConversation({
       tenant,
       lead,
       conversation,
       trigger,
+      agentType: agent,
       contextMessage,
       skipPacing: true,
       skipSms: true,
